@@ -5,6 +5,9 @@ import json
 
 DATA_NAME = "name"
 DATA_FACE_LOCATION = "location"
+DATA_POSITION = "position"
+DATA_EMPLOYEE_ID = "employeeId"
+DATA_CREATED_AT = "createdAt"
 DATA_FACE_EMBEDDING = "embedding"
 DATA_TIMESTAMP = "timestamp"
 
@@ -34,7 +37,9 @@ class UserCache:
         self.user_data = user_data
         for user in self.user_data:
             self.embeddings.append(json.loads(user[DATA_FACE_EMBEDDING]))
-            self.users.append(user[DATA_NAME])
+            user.pop(DATA_FACE_EMBEDDING)
+            user.pop("_id")
+            self.users.append(user)
 
     def get(self):
         return self.user_embeddings
@@ -66,15 +71,19 @@ class Db_Controller:
     def register_new_user(
         self, 
         name, 
+        position,
+        employeeId,
+        createdAt,
         timestamp, 
-        face_location, 
         face_embedding
     ):
         self.user_collection.insert_one({
             DATA_NAME: name,
+            DATA_POSITION: position,
+            DATA_EMPLOYEE_ID: employeeId,
+            DATA_CREATED_AT:createdAt,
+            DATA_TIMESTAMP: timestamp,
             DATA_FACE_EMBEDDING: json.dumps(face_embedding, cls=NumpyArrayEncoder),
-            DATA_FACE_LOCATION: json.dumps(face_location, cls=NumpyArrayEncoder),
-            DATA_TIMESTAMP: timestamp
         })
         self.update_user_cache()
 
@@ -96,6 +105,10 @@ class Db_Controller:
         return matches_indices
 
     def get_user_from_matches(self, matches):
-        matches_users = [i for (i, v) in zip(self.user_cache.users, matches) if v]
-        return matches_users
+        matches_user = [i for (i, v) in zip(self.user_cache.users, matches) if v]
+        return matches_user[0]
+
+    def get_user_from_index(self, index):
+        matches_user = self.user_cache.users[index]
+        return matches_user
 

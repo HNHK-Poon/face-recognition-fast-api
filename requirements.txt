@@ -1,5 +1,7 @@
+wheel
 fastapi
 uvicorn
 websockets
 cmake
 pymongo
+face-recognition
