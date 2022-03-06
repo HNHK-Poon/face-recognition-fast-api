@@ -10,6 +10,8 @@ DATA_EMPLOYEE_ID = "employeeId"
 DATA_CREATED_AT = "createdAt"
 DATA_FACE_EMBEDDING = "embedding"
 DATA_TIMESTAMP = "timestamp"
+DATA_IMAGE_64 = "image64"
+
 
 class NumpyArrayEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -21,6 +23,7 @@ class NumpyArrayEncoder(json.JSONEncoder):
             return obj.tolist()
         else:
             return super(NumpyArrayEncoder, self).default(obj)
+
 
 class UserCache:
     DATA_NAME = "name"
@@ -35,6 +38,8 @@ class UserCache:
 
     def update(self, user_data):
         self.user_data = user_data
+        self.embeddings = []
+        self.users = []
         for user in self.user_data:
             self.embeddings.append(json.loads(user[DATA_FACE_EMBEDDING]))
             user.pop(DATA_FACE_EMBEDDING)
@@ -51,9 +56,9 @@ class Db_Controller:
     RECORD_COLLECTION = "record"
 
     def __init__(
-        self, 
+        self,
         path="mongodb://localhost:27017/"
-     ) -> None:
+    ) -> None:
         self.mongo_client = pymongo.MongoClient(path)
         self.db = None
         self.user_collection = None
@@ -66,29 +71,38 @@ class Db_Controller:
         self.db = self.mongo_client[self.DB_NAME]
         self.user_collection = self.db[self.USER_COLLECTION]
         self.record_collection = self.db[self.RECORD_COLLECTION]
-        print("Successfully init db, list of collections:", self.mongo_client.list_database_names())
+        print("Successfully init db, list of collections:",
+              self.mongo_client.list_database_names())
 
     def register_new_user(
-        self, 
-        name, 
+        self,
+        name,
         position,
         employeeId,
         createdAt,
-        timestamp, 
+        timestamp,
+        image64,
         face_embedding
     ):
         self.user_collection.insert_one({
             DATA_NAME: name,
             DATA_POSITION: position,
             DATA_EMPLOYEE_ID: employeeId,
-            DATA_CREATED_AT:createdAt,
+            DATA_CREATED_AT: createdAt,
             DATA_TIMESTAMP: timestamp,
+            DATA_IMAGE_64: image64,
             DATA_FACE_EMBEDDING: json.dumps(face_embedding, cls=NumpyArrayEncoder),
         })
         self.update_user_cache()
 
+    def remove_user(
+        self,
+        employeeId
+    ):
+        self.user_collection.delete_one({DATA_EMPLOYEE_ID: employeeId})
+
     def get_all_users(self):
-        return self.user_cache.get()
+        return self.user_cache.users
 
     def update_user_cache(self):
         self.user_cache.update(
@@ -105,10 +119,10 @@ class Db_Controller:
         return matches_indices
 
     def get_user_from_matches(self, matches):
-        matches_user = [i for (i, v) in zip(self.user_cache.users, matches) if v]
+        matches_user = [i for (i, v) in zip(
+            self.user_cache.users, matches) if v]
         return matches_user[0]
 
     def get_user_from_index(self, index):
         matches_user = self.user_cache.users[index]
         return matches_user
-

@@ -1,14 +1,18 @@
 from array import array
 from time import time
-from dbcontroller import DATA_CREATED_AT, DATA_EMPLOYEE_ID, DATA_NAME, DATA_POSITION, DATA_TIMESTAMP
-from fastapi import FastAPI, WebSocket
+from turtle import pos
+from dbcontroller import DATA_CREATED_AT, DATA_EMPLOYEE_ID, DATA_NAME, DATA_POSITION, DATA_TIMESTAMP, DATA_IMAGE_64
+from fastapi import FastAPI, WebSocket, Request, status
 from fastapi.responses import HTMLResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 import face_recognition
 import json
 import numpy as np
 import cv2
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from dbcontroller import Db_Controller
 
@@ -40,27 +44,35 @@ html = """
 </html>
 """
 
+
 class registerData(BaseModel):
     name: str
     position: str
     employeeId: str
-    createAt: str
+    createdAt: str
+    image64: str
     imageArray: List[int]
     timestamp: int
 
 
 class userResponse(BaseModel):
-    name: str 
+    name: str
     embedding: str
+
+
+class deleteData(BaseModel):
+    employeeId: str
 
 
 @app.get("/")
 async def home():
     return HTMLResponse(html)
 
+
 @app.post("/register")
-def register(data:registerData, status_code=201):
-    image = np.resize(data.imageArray, (240,420,3))
+def register(data: registerData, status_code=201):
+    print(data)
+    image = np.resize(data.imageArray, (240, 420, 3))
     image = image.astype(np.uint8)
     face_locations = face_recognition.face_locations(image)
     if len(face_locations) > 0:
@@ -68,35 +80,49 @@ def register(data:registerData, status_code=201):
         if len(face_locations) > 1:
             image_sizes = []
             for _face_location in face_locations:
-                image_sizes.append(_face_location[2] - _face_location[0]) + (_face_location[1]-_face_location[3])
+                image_sizes.append(
+                    _face_location[2] - _face_location[0]) + (_face_location[1]-_face_location[3])
             face_location = face_locations[image_sizes.index(max(image_sizes))]
         else:
             face_location = np.asarray(face_locations[0])
 
-        face_embeddings = face_recognition.face_encodings(image, face_locations, model="large")
-        # db.register_new_user(
-        #     name=data.name,
-        #     timestamp=data.timestamp,
-        #     face_location=face_location,
-        #     face_embedding=face_embeddings[0]
-        # )
-        print(data.name, data.id, data.position, data.createAt, face_location, face_embeddings, data.timestamp)
+        face_embeddings = face_recognition.face_encodings(
+            image, face_locations, model="large")
+        db.register_new_user(
+            name=data.name,
+            position=data.position,
+            employeeId=data.employeeId,
+            createdAt=data.createdAt,
+            timestamp=data.timestamp,
+            image64=data.image64,
+            face_embedding=face_embeddings[0]
+        )
+        print(data.name, data.employeeId, data.position, data.createdAt,
+              face_location, face_embeddings, data.timestamp)
 
     return {"status": "success"}
 
-@app.get("/getUser")
-async def getUser(status_code=200, response_model=userResponse):
-    cursor = users.find(
-        {"name": "Alex"}, {"name":1, "embedding":1}
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
     )
-    users_res = []
-    for c in cursor:
-        print(c, type(c))
-        users_res.append({
-            'name': c["name"],
-            'embedding': c["embedding"]
-        })
-    return users_res
+
+
+@app.get("/getUsers")
+async def getUser(status_code=200):
+    users = db.get_all_users()
+    return users
+
+
+@app.post("/deleteUser")
+def register(data: deleteData, status_code=201):
+    print(data, data.employeeId)
+    db.remove_user(employeeId=data.employeeId)
+    db.update_user_cache()
+    return {"status": "success"}
 
 
 @app.websocket("/ws")
@@ -108,8 +134,8 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             event = json.loads(data)
             event_type = event["eventType"]
-            if event_type == "recognition":            
-                image = np.resize(event["imageData"], (240,420,3))
+            if event_type == "recognition":
+                image = np.resize(event["imageData"], (240, 420, 3))
                 image = image.astype(np.uint8)
                 face_locations = face_recognition.face_locations(image)
                 if len(face_locations) > 0:
@@ -117,44 +143,55 @@ async def websocket_endpoint(websocket: WebSocket):
                     if len(face_locations) > 1:
                         image_sizes = []
                         for _face_location in face_locations:
-                            image_sizes.append(_face_location[2] - _face_location[0]) + (_face_location[1]-_face_location[3])
-                        face_location = face_locations[image_sizes.index(max(image_sizes))]
+                            image_sizes.append(
+                                _face_location[2] - _face_location[0]) + (_face_location[1]-_face_location[3])
+                        face_location = face_locations[image_sizes.index(
+                            max(image_sizes))]
                     else:
                         face_location = face_locations[0]
-                    
-                    face_embeddings = face_recognition.face_encodings(image, [face_location], model="large")
-                    matches = face_recognition.compare_faces(db.get_embeddings(), face_embeddings[0])
-                    if len(db.get_matches_indices(matches)) == 0 :
-                        print("No matches")
+
+                    face_embeddings = face_recognition.face_encodings(
+                        image, [face_location], model="large")
+                    matches = face_recognition.compare_faces(
+                        db.get_embeddings(), face_embeddings[0])
+                    if len(db.get_matches_indices(matches)) == 0:
+                        reply = {
+                            "eventType": "userNotDetected",
+                            "data": {
+                                "faceLocations": face_location,
+                            }
+                        }
                     elif len(db.get_matches_indices(matches)) == 1:
                         reply = {
-                        "eventType": "boundingBox",
-                        "data": {
-                            "faceLocations": face_locations[0],
-                            "face_embeddings": "",
-                            "user": db.get_user_from_matches(matches)
+                            "eventType": "userDetected",
+                            "data": {
+                                "faceLocations": face_location,
+                                "face_embeddings": "",
+                                "user": db.get_user_from_matches(matches)
+                            }
                         }
-                    }
                     else:
-                        face_distances = face_recognition.face_distance(db.get_embeddings(), face_embeddings[0])
+                        face_distances = face_recognition.face_distance(
+                            db.get_embeddings(), face_embeddings[0])
                         best_match_index = np.argmin(face_distances)
                         reply = {
-                            "eventType": "boundingBox",
+                            "eventType": "multiUserDetected",
                             "data": {
-                                "faceLocations": face_locations[0],
+                                "faceLocations": face_location,
                                 "face_embeddings": "",
                                 "user": db.get_user_from_index(best_match_index)
                             }
                         }
-                        
-                    print(reply)
                     await websocket.send_text(json.dumps(reply))
-                else: 
-                    print("No user found")
+                else:
+                    reply = {
+                        "eventType": "faceNotDetected",
+                    }
+                    await websocket.send_text(json.dumps(reply))
 
             elif event_type == "register":
                 data = event["data"]
-                image = np.resize(data["imageArray"], (240,420,3))
+                image = np.resize(data["imageArray"], (240, 420, 3))
                 image = image.astype(np.uint8)
                 face_locations = face_recognition.face_locations(image)
                 if len(face_locations) > 0:
@@ -162,24 +199,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     if len(face_locations) > 1:
                         image_sizes = []
                         for _face_location in face_locations:
-                            image_sizes.append(_face_location[2] - _face_location[0]) + (_face_location[1]-_face_location[3])
-                        face_location = face_locations[image_sizes.index(max(image_sizes))]
+                            image_sizes.append(
+                                _face_location[2] - _face_location[0]) + (_face_location[1]-_face_location[3])
+                        face_location = face_locations[image_sizes.index(
+                            max(image_sizes))]
                     else:
                         face_location = np.asarray(face_locations[0])
 
-                    face_embeddings = face_recognition.face_encodings(image, face_locations, model="large")
-                    
+                    face_embeddings = face_recognition.face_encodings(
+                        image, face_locations, model="large")
+
                     db.register_new_user(
                         name=data[DATA_NAME],
                         position=data[DATA_POSITION],
                         employeeId=data[DATA_EMPLOYEE_ID],
                         createdAt=data[DATA_CREATED_AT],
                         timestamp=data[DATA_TIMESTAMP],
+                        image64=data[DATA_IMAGE_64],
                         face_embedding=face_embeddings[0]
                     )
 
-                print(face_embeddings, data[DATA_NAME], data[DATA_POSITION], data[DATA_EMPLOYEE_ID], data[DATA_CREATED_AT], data[DATA_TIMESTAMP])
-                
+                print(face_embeddings, data[DATA_NAME], data[DATA_POSITION],
+                      data[DATA_EMPLOYEE_ID], data[DATA_CREATED_AT], data[DATA_TIMESTAMP])
 
         except Exception as e:
             print(e)
