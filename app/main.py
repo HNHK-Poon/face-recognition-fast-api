@@ -1,13 +1,13 @@
 from array import array
 from time import time
 from turtle import pos
+from recognition import Vision
 from dbcontroller import DATA_CREATED_AT, DATA_EMPLOYEE_ID, DATA_NAME, DATA_POSITION, DATA_TIMESTAMP, DATA_IMAGE_64
 from fastapi import FastAPI, WebSocket, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-import face_recognition
 import json
 import numpy as np
 import cv2
@@ -18,6 +18,7 @@ from dbcontroller import Db_Controller
 
 app = FastAPI()
 db = Db_Controller("mongodb://localhost:27017/")
+vision = Vision(tolerance=0.2)
 
 origins = [
     "http://localhost",
@@ -74,7 +75,7 @@ def register(data: registerData, status_code=201):
     print(data)
     image = np.resize(data.imageArray, (240, 420, 3))
     image = image.astype(np.uint8)
-    face_locations = face_recognition.face_locations(image)
+    face_locations = vision.face_locations(image)
     if len(face_locations) > 0:
         face_location = np.asarray(face_locations[0])
         if len(face_locations) > 1:
@@ -86,8 +87,8 @@ def register(data: registerData, status_code=201):
         else:
             face_location = np.asarray(face_locations[0])
 
-        face_embeddings = face_recognition.face_encodings(
-            image, face_locations, model="large")
+        face_embeddings = vision.face_encodings(
+            image, face_locations)
         db.register_new_user(
             name=data.name,
             position=data.position,
@@ -137,7 +138,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if event_type == "recognition":
                 image = np.resize(event["imageData"], (240, 420, 3))
                 image = image.astype(np.uint8)
-                face_locations = face_recognition.face_locations(image)
+                face_locations = vision.face_locations(image)
                 if len(face_locations) > 0:
                     face_location = np.asarray(face_locations[0])
                     if len(face_locations) > 1:
@@ -150,9 +151,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         face_location = face_locations[0]
 
-                    face_embeddings = face_recognition.face_encodings(
-                        image, [face_location], model="large")
-                    matches = face_recognition.compare_faces(
+                    face_embeddings = vision.face_encodings(
+                        image, [face_location])
+                    matches = vision.compare_faces(
                         db.get_embeddings(), face_embeddings[0])
                     if len(db.get_matches_indices(matches)) == 0:
                         reply = {
@@ -171,7 +172,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             }
                         }
                     else:
-                        face_distances = face_recognition.face_distance(
+                        face_distances = vision.face_distance(
                             db.get_embeddings(), face_embeddings[0])
                         best_match_index = np.argmin(face_distances)
                         reply = {
@@ -193,7 +194,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 data = event["data"]
                 image = np.resize(data["imageArray"], (240, 420, 3))
                 image = image.astype(np.uint8)
-                face_locations = face_recognition.face_locations(image)
+                face_locations = vision.face_locations(image)
                 if len(face_locations) > 0:
                     face_location = np.asarray(face_locations[0])
                     if len(face_locations) > 1:
@@ -206,8 +207,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         face_location = np.asarray(face_locations[0])
 
-                    face_embeddings = face_recognition.face_encodings(
-                        image, face_locations, model="large")
+                    face_embeddings = vision.face_encodings(
+                        image, face_locations)
 
                     db.register_new_user(
                         name=data[DATA_NAME],
