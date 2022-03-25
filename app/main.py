@@ -18,7 +18,7 @@ from dbcontroller import Db_Controller
 
 app = FastAPI()
 db = Db_Controller("mongodb://localhost:27017/")
-vision = Vision(tolerance=0.2)
+vision = Vision(tolerance=0.4)
 
 origins = [
     "http://localhost",

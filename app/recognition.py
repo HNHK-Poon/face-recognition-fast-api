@@ -1,6 +1,8 @@
 import dlib
 from pkg_resources import resource_filename
 import numpy as np
+import cv2
+
 
 class Vision:
     def __init__(self, tolerance) -> None:
@@ -13,12 +15,59 @@ class Vision:
         return dlib.get_frontal_face_detector()
 
     def init_pose_predictor(self):
-        model_location = resource_filename(__name__, "models/shape_predictor_68_face_landmarks.dat")
+        model_location = resource_filename(
+            __name__, "models/shape_predictor_68_face_landmarks.dat")
         return dlib.shape_predictor(model_location)
 
     def init_face_encoder(self):
-        model_location = resource_filename(__name__, "models/dlib_face_recognition_resnet_model_v1.dat")
+        model_location = resource_filename(
+            __name__, "models/dlib_face_recognition_resnet_model_v1.dat")
         return dlib.face_recognition_model_v1(model_location)
+
+    def automatic_brightness_and_contrast(self, image, clip_hist_percent=1):
+        bgr = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate grayscale histogram
+        hist = cv2.calcHist([gray],[0],None,[256],[0,256])
+        hist_size = len(hist)
+        
+        # Calculate cumulative distribution from the histogram
+        accumulator = []
+        accumulator.append(float(hist[0]))
+        for index in range(1, hist_size):
+            accumulator.append(accumulator[index -1] + float(hist[index]))
+        
+        # Locate points to clip
+        maximum = accumulator[-1]
+        clip_hist_percent *= (maximum/100.0)
+        clip_hist_percent /= 2.0
+        
+        # Locate left cut
+        minimum_gray = 0
+        while accumulator[minimum_gray] < clip_hist_percent:
+            minimum_gray += 1
+        
+        # Locate right cut
+        maximum_gray = hist_size -1
+        while accumulator[maximum_gray] >= (maximum - clip_hist_percent):
+            maximum_gray -= 1
+        
+        # Calculate alpha and beta values
+        alpha = 255 / (maximum_gray - minimum_gray)
+        beta = -minimum_gray * alpha
+        
+        '''
+        # Calculate new histogram with desired range and show histogram 
+        new_hist = cv2.calcHist([gray],[0],None,[256],[minimum_gray,maximum_gray])
+        plt.plot(hist)
+        plt.plot(new_hist)
+        plt.xlim([0,256])
+        plt.show()
+        '''
+
+        auto_result = cv2.convertScaleAbs(bgr, alpha=alpha, beta=beta)
+        return auto_result
 
     def _rect_to_css(self, rect):
         """
@@ -56,6 +105,7 @@ class Vision:
         """
         raw_face_location = self.face_detector(
             img, number_of_times_to_upsample)
+        # self.BrightnessContrast(img, brightness=0)
         face_locations = [self._trim_css_to_bounds(self._rect_to_css(
             face), img.shape) for face in self.face_detector(img, number_of_times_to_upsample)]
         return face_locations
@@ -65,7 +115,7 @@ class Vision:
             face_locations = self.face_detector(face_image)
         else:
             face_locations = [self._css_to_rect(face_location)
-                            for face_location in face_locations]
+                              for face_location in face_locations]
 
         return [self.pose_predictor(face_image, face_location) for face_location in face_locations]
 
@@ -78,15 +128,16 @@ class Vision:
         :return: A list of dicts of face feature locations (eyes, nose, etc)
         """
         if face_locations is None:
-                face_locations = self.face_detector(face_image)
+            face_locations = self.face_detector(face_image)
         else:
             face_locations = [self._css_to_rect(face_location)
-                            for face_location in face_locations]
+                              for face_location in face_locations]
 
-        landmarks = [self.pose_predictor(face_image, face_location) for face_location in face_locations]
+        landmarks = [self.pose_predictor(
+            face_image, face_location) for face_location in face_locations]
 
         landmarks_as_tuples = [[(p.x, p.y) for p in landmark.parts()]
-                            for landmark in landmarks]
+                               for landmark in landmarks]
 
         # For a definition of each point index, see https://cdn-images-1.medium.com/max/1600/1*AbEg31EgkbXSQehuNJBlWg.png
         return [{
@@ -110,9 +161,10 @@ class Vision:
         :param model: Optional - which model to use. "large" or "small" (default) which only returns 5 points but is faster.
         :return: A list of 128-dimensional face encodings (one for each face in the image)
         """
+        adjusted_face_image = self.automatic_brightness_and_contrast(face_image, clip_hist_percent=5)
         raw_landmarks = self._raw_face_landmarks(
-            face_image, known_face_locations)
-        return [np.array(self.face_encoder.compute_face_descriptor(face_image, raw_landmark_set, num_jitters)) for raw_landmark_set in raw_landmarks]
+            adjusted_face_image, known_face_locations)
+        return [np.array(self.face_encoder.compute_face_descriptor(adjusted_face_image, raw_landmark_set, num_jitters)) for raw_landmark_set in raw_landmarks]
 
     def face_distance(self, face_encodings, face_to_compare):
         """
@@ -126,7 +178,6 @@ class Vision:
             return np.empty((0))
 
         return np.linalg.norm(face_encodings - face_to_compare, axis=1)
-
 
     def compare_faces(self, known_face_encodings, face_encoding_to_check):
         """
