@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   api:
-    container_name: "docker-fastapi-face-recognition"
+    container_name: "docker-fastapi-face-recognition-alpine-1"
     build: .
     ports:
       - 8080:8000

@@ -9,16 +9,12 @@ class Vision:
         self.face_encoder = self.init_face_encoder()
         self.tolerance = tolerance
 
-    def init_face_detector(self):
-        return dlib.get_frontal_face_detector()
-
-    def init_pose_predictor(self):
-        model_location = resource_filename(__name__, "models/shape_predictor_68_face_landmarks.dat")
-        return dlib.shape_predictor(model_location)
-
     def init_face_encoder(self):
         model_location = resource_filename(__name__, "models/dlib_face_recognition_resnet_model_v1.dat")
         return dlib.face_recognition_model_v1(model_location)
+
+    def init_face_detector(self):
+        return dlib.get_frontal_face_detector()
 
     def _rect_to_css(self, rect):
         """
@@ -60,6 +56,10 @@ class Vision:
             face), img.shape) for face in self.face_detector(img, number_of_times_to_upsample)]
         return face_locations
 
+    def init_pose_predictor(self):
+        model_location = resource_filename(__name__, "models/shape_predictor_68_face_landmarks.dat")
+        return dlib.shape_predictor(model_location)
+
     def _raw_face_landmarks(self, face_image, face_locations=None):
         if face_locations is None:
             face_locations = self.face_detector(face_image)
@@ -88,7 +88,6 @@ class Vision:
         landmarks_as_tuples = [[(p.x, p.y) for p in landmark.parts()]
                             for landmark in landmarks]
 
-        # For a definition of each point index, see https://cdn-images-1.medium.com/max/1600/1*AbEg31EgkbXSQehuNJBlWg.png
         return [{
             "chin": points[0:17],
             "left_eyebrow": points[17:22],
@@ -100,6 +99,10 @@ class Vision:
             "top_lip": points[48:55] + [points[64]] + [points[63]] + [points[62]] + [points[61]] + [points[60]],
             "bottom_lip": points[54:60] + [points[48]] + [points[60]] + [points[67]] + [points[66]] + [points[65]] + [points[64]]
         } for points in landmarks_as_tuples]
+
+    def init_face_encoder(self):
+        model_location = resource_filename(__name__, "models/dlib_face_recognition_resnet_model_v1.dat")
+        return dlib.face_recognition_model_v1(model_location)
 
     def face_encodings(self, face_image, known_face_locations=None, num_jitters=1):
         """
