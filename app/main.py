@@ -19,6 +19,7 @@ from dbcontroller import Db_Controller
 # Init mongodb contoller and recognition algorithms
 app = FastAPI()
 db = Db_Controller("mongodb://face-recognition-mongodb")
+# db = Db_Controller("mongodb://localhost:27017/")
 vision = Vision(tolerance=0.4)
 
 # Enable CORS from recognised origin
